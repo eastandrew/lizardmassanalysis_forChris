@@ -1,0 +1,276 @@
+---
+title: "35dayTRVanolissagreiPFOS"
+author: "Andrew East"
+date: "10/20/2019"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+
+# Package Management and Data Import
+
+Major endpoints recorded through time across three specific Anolis sagrei experiments.  Chemicals were PFOS and PFHxS and time spans were a 35 day PFOS, a 63 day PFHxS, and a 90 day PFOS.  Additional data from 30, 60, and 90 day PFOS dermal exposure.  All data have necropsy data as well.  
+
+New notes from 01FEB2023: DoD doesn't allow the new versions of R so those warnings are just a function of my R version and don't have any impact on analysis or code.  
+
+
+```{r, pkgmgmt, message=F}
+
+
+
+
+### install_load function from maloneypatr, Irucka Embry, USGS and stack overflow 
+### see https://gitlab.com/iembry/install.load
+### Check if R package is installed then load library answered by
+###	maloneypatr is the source for the original function. See http://stackoverflow.com/questions/15155814/check-if-r-package-is-installed-then-load-library
+# Source begins
+install_load <- function (package1, ...) {
+  # convert arguments to vector
+  packages <- c(package1, ...)
+#assert_that(qtest(packages, "S"), msg = "One of the provided package(s) is(are) not a string. Please make sure that each packages is a string.")
+# only process with string values and provide a stop warning if not
+  
+  # start loop to determine if each package is installed
+  for (package in packages) {
+    # if package is installed locally, load
+  if (package %in% rownames(installed.packages()))
+      try(do.call(library, list(package))) # Source 2
+    # if package is not installed locally, download and then load
+    else {
+      install.packages(package, repos =
+        c("https://cloud.r-project.org", "http://owi.usgs.gov/R/"),
+        dependencies = NA, type = getOption("pkgType"))
+      try(do.call(library, list(package))) # Source 2
+    }
+  }
+}
+# Source ends
+
+
+install_load("readr", "FSA", "tidyverse", "multcomp", "gplots", "RColorBrewer", "lattice","psych", "nlme", "car", "multcompView", "lsmeans", "segmented", "sjstats", "drc", "emmeans")  #"SiZer",   (typo in the package?)
+
+###! Tread Carefully Here !##
+options(dplyr.summarise.inform=F) 
+### This turns off the tidyverse summarize/summarise messages indicating default grouping patterns in resultant tibbles ##
+### If you don't know what this means, cheak out https://stackoverflow.com/questions/62140483/how-to-interpret-dplyr-message-summarise-regrouping-output-by-x-override
+### Implications of this being false are unknown errors and impacts in other activities in this R session!
+
+
+
+```
+
+
+```{r, datainput}
+ansa35pfos <- read_csv("anolissagrei_35day_PFOS_bodymassthroughtime_simplesheet.csv", 
+                       col_types = cols(date = col_date(format = "%m/%d/%Y")))
+
+ansa90pfos <- read_csv("PFOS_60_day_lizmasses_3_20_2019 (NEW).csv", 
+    col_types = cols(crickseaten = col_double(), 
+        cricksfed = col_double(), date = col_date(format = "%m_%d_%Y"), 
+        deltamass = col_double(), percentgrowthrate = col_double(), 
+        percentofstartweight = col_double(), 
+        percpercgrowthrate = col_double(), 
+        propcrick = col_double()))
+
+ansa63pfhxs <- read_csv("pfhxs_massinfo_8-10_2018.csv", 
+                        col_types = cols(date = col_date(format = "%m/%d/%Y")))
+
+dermalPFOS <- read_csv("browns_dermal_mass_through_4_11_18_ANEA.csv", 
+                       col_types = cols(date = col_date(format = "%m/%d/%Y")))
+
+dermalPFOSnecropsy <- read_csv("browns_dermal_necropsydata_through_day90_5_22_18_ANEA_analysissetup.csv", 
+                               col_types = cols(dateofnecrops = col_date(format = "%m/%d/%Y")))
+
+ansa63pfhxsnecropsy <- read_csv("anolissagrei_60day_PFHxS_8_2018_necropsytissuemassdata.csv",
+                                col_types = cols(date = col_date(format = "%m/%d/%Y")))
+
+ansa35pfosnecropsy <- read_csv("anolissagrei_35day_PFOS_necropsytissuemasses.csv", 
+                               col_types = cols(TimeofDeath = col_time(format = "%H:%M")))
+
+
+
+
+```
+
+
+# PFOS 35 day
+## Data Manipulation 35d PFOS  
+
+
+```{r, 35daypfosdatamanipulation}
+ansa35pfos2 <- ansa35pfos %>%
+  arrange(treat,lizardnumber,date) %>%
+  mutate(
+    propchange=case_when(
+      treat==lag(treat)&lizardnumber==lag(lizardnumber) ~ lizardmass/lag(lizardmass)
+    ),
+    treatanalytic = case_when(
+      treat==0 ~ 0,
+      treat==0.02 ~ 0.02,
+      treat==0.2 ~ 0.2,
+      treat==2 ~ 2.98
+    ),
+    treatanalyticfac = factor(case_when(
+      treat==0 ~ "0 mg/kg/day",
+      treat==0.02 ~ "0.02 mg/kg/day",
+      treat==0.2 ~ "0.2 mg/kg/day",
+      treat==2 ~ "2.98 mg/kg/day"
+    ))
+  )
+#head(ansa35pfos2, 20)
+#tail(ansa35pfos2, 20)
+ansa35pfos2 <- as.data.frame(ansa35pfos2)
+ansa35pfos2$startmass2 <- rep(ansa35pfos2$lizardmass[ansa35pfos2$date==min(ansa35pfos2$date)],each=length(unique(ansa35pfos2$date)))
+#ansa35pfos2
+ansa35pfos2$propstart <- ansa35pfos2$lizardmass/ansa35pfos2$startmass2
+
+ansa35pfos2$treatfac <- as.factor(ansa35pfos2$treat)
+
+ansa35pfos2$lizmass2 <- ansa35pfos2$totalmass-ansa35pfos2$bagmass
+ansa35pfos2$expfac <- as.factor(ansa35pfos2$exposure)
+ansa35pfos2$exp2fac <- as.factor(ansa35pfos2$exposure2)
+
+#ansa35pfos2
+
+
+
+```
+
+
+
+
+## ANOVA and Dunnett's test of slope with Effect Level Predicted by Predicted day 90 mass ##  
+
+
+```{r, anovadunnettgrowthslopepostexposure, fig.height=8, fig.width=8}
+
+
+testslopedf <- ansa35pfos2 %>%
+  filter(exp2fac=="y") %>%
+  group_by(treatanalytic,lizardnumber) %>%
+  summarize(slope = summary(lm(propstart~samplingevent2))[[4]][2],
+            slopemass = summary(lm(lizardmass~samplingevent2))[[4]][2],
+            day90mass = predict(lm(lizardmass~samplingevent2), newdata=data.frame(samplingevent2=13)),
+            day90percstart = predict(lm(propstart~samplingevent2), newdata=data.frame(samplingevent2=13))
+            #massmodel = lm(lizardmass~samplingevent2)
+            )
+
+
+
+slope2 <- ansa35pfos2 %>%
+  filter(exp2fac=="y") %>%
+  group_by(treatanalytic, lizardnumber) %>%
+  summarize(slope_g_per_day = lm(lizardmass~samplingevent2)$coef[[2]],
+            intercept_g = lm(lizardmass~samplingevent2)$coef[[1]])
+slope2
+write_csv(slope2, "slopedataframe.csv")
+
+modobj <- lm(lizardmass~samplingevent2*treatanalyticfac, data=ansa35pfos2 %>%
+  filter(exp2fac=="y")%>%droplevels()%>%ungroup())
+modobja <- lm(lizardmass~samplingevent2+treatanalyticfac, data=ansa35pfos2 %>%
+  filter(exp2fac=="y")%>%droplevels()%>%ungroup())
+
+
+cs <- emtrends(modobj,specs=pairwise~treatanalyticfac, var="samplingevent2")
+css <- summary(cs,infer=TRUE)
+cs
+css
+plot(cs, CIs=T, comparisons=T, horizontal=F) + theme_classic()
+
+
+testslopedf$meancontslopemass <- median(testslopedf$slopemass[testslopedf$treatanalytic==0])
+testslopedf$normalizedslopemass <- (testslopedf$slopemass/testslopedf$meancontslopemass)
+testslopedf$meancontday90mass <- median(testslopedf$day90mass[testslopedf$treatanalytic==0])
+testslopedf$normalizedday90mass <- (testslopedf$day90mass/testslopedf$meancontday90mass)
+
+boxplot(slope~treatanalytic, data=testslopedf, ylab="Slope of mass~time")
+
+testslopedf$treatanalyticfac <- factor(testslopedf$treatanalytic)
+aovslope <- aov(slope~treatanalyticfac, data=testslopedf)
+summary(aovslope)
+#TukeyHSD(aovstart)
+slopedunnett <- glht(aovslope, linfct=mcp(treatanalyticfac="Dunnett"))
+summary(slopedunnett)
+
+shapiro.test(aovslope$residuals)
+outlierTest(aovslope)
+hist(aovslope$residuals)
+bartlett.test(slope~treatanalyticfac, data=testslopedf)
+leveneTest(slope~treatanalyticfac, data=testslopedf)
+hist(testslopedf$slope)
+cohens_f(aovslope)
+eta_sq(aovslope)
+anova_stats(aovslope)
+
+
+drmnorm90mass <- drm(normalizedday90mass~treatanalytic, data=testslopedf, fct=LL.2(), type="binomial")
+#mselect(drmnorm90mass, list(LL.3(),LL.4(),LL.5(),W1.2(),W2.2(),W1.4(),W2.4()))
+drmnorm90mass5 <- drm(normalizedday90mass~treatanalytic, data=testslopedf, fct=LL.5(), type="binomial")
+
+par(font=2, font.lab=2, font.axis=2, cex.axis=1.5, cex.lab=2, bty="l", mai=c(0.9,1.5,0.1,0.1))
+plot(drmnorm90mass, pch=16, lwd=3, col="red", cex=2, xlab="Treatment, mg/kg/day [PFOS]", ylab="Predicted Day 90 Mass\nrelative to control median", ylim=c(0,1.35), axes=F)
+plot(drmnorm90mass, type="obs", pch=3, add=T)
+#plot(drmnorm90mass5, type="none", col="blue", add=T)
+axis(1,at=c(0.001,0.02,0.2,2.98), labels=c(0,0.02,0.2,2.98),font=2, font.lab=2, font.axis=2)
+axis(2,at=c(-0.2,0,0.2,0.4,0.6,0.8,1.0),labels=c(-0.2,0,0.2,0.4,0.6,0.8,1.0), font=2, font.lab=2, font.axis=2)
+abline(h=c(0,1), lty=2, col="gray")
+arrows(0.25,0.9,0.777,0.9, length=0.1, angle=90, code=2, col="red")
+arrows(0.73,0.8,1.82564,0.8, length=0.1, angle=90, code=2, col="red")
+ED(drmnorm90mass,c(0.9,0.8), type="absolute", interval="delta")
+predict(drmnorm90mass,newdata=data.frame(0.25), interval="confidence")
+predict(drmnorm90mass,newdata=data.frame(0.73), interval="confidence")
+
+
+
+
+```
+
+
+
+```{r, fig.height=8, fig.width=8}
+ggplot(subset(ansa35pfos2, exp2fac=="y"), aes(x=samplingevent2,y=lizardmass, group=lizardnumber, colour=factor(treatanalytic))) + 
+  geom_vline(xintercept=0) +
+  geom_point(size=2.5) +
+  geom_point(data=subset(ansa35pfos2, exp2fac=="n"), aes(x=samplingevent2, y=lizardmass), colour="black") +
+  geom_smooth(method="lm", se=F, fullrange=T) +
+  facet_wrap(~treatanalyticfac) + 
+  geom_hline(aes(yintercept=1)) +
+  guides(colour="none") +
+  ggtitle("35 day PFOS exposure in young anoles") +
+  scale_x_continuous(limits=c(-2,13),breaks=c(-2,-1,0,1,2,3,4,5,7,10,13)) +
+  theme_classic() +
+  theme(axis.title=element_text(size=20),
+        axis.text=element_text(size=14, face="bold"),
+        title=element_text(size=20), 
+        strip.text=element_text(size=15, face="bold")
+        ) +
+  xlab("Week") +
+  ylab("Lizard Mass, g") +
+  annotate("text", x=0.25,y=1.5,label="Exposure Start",hjust=0, angle=90)
+
+
+
+```
+
+
+```{r, fig.height=8, fig.width=8}
+
+
+par(font=2, font.lab=2, font.axis=2, cex.axis=1.5, cex.lab=2, bty="l", mai=c(0.9,1.5,0.1,0.1))
+plot(drmnorm90mass, pch=16, lwd=3, col="red", cex=2, xlab="Treatment, mg/kg/day [PFOS]", ylab="Predicted Day 90 Mass\nrelative to control median", ylim=c(0,1.35), axes=F, type="confidence")
+plot(drmnorm90mass, type="obs", pch=3, add=T)
+#plot(drmnorm90mass5, type="none", col="blue", add=T)
+axis(1,at=c(0.001,0.02,0.2,2.98), labels=c(0,0.02,0.2,2.98),font=2, font.lab=2, font.axis=2)
+axis(2,at=c(-0.2,0,0.2,0.4,0.6,0.8,1.0),labels=c(-0.2,0,0.2,0.4,0.6,0.8,1.0), font=2, font.lab=2, font.axis=2)
+abline(h=c(0,1), lty=2, col="gray")
+arrows(0.73,0.8,1.82564,0.8, length=0.1, angle=90, code=2, col="red")
+arrows(0.73,predict(drmnorm90mass,newdata=data.frame(0.73), interval="confidence")[2],0.73,predict(drmnorm90mass,newdata=data.frame(0.73), interval="confidence")[3], length=0.1, angle=90, code=3, col="red")
+
+ED(drmnorm90mass,c(0.8), type="absolute", interval="delta")
+predict(drmnorm90mass,newdata=data.frame(0.73), interval="confidence")[2]
+
+```
